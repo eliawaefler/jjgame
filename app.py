@@ -149,6 +149,7 @@ if st.session_state.uid is None:
         st.markdown("**Login**")
         li_user = st.text_input("Username", key="li_u")
         li_pw = st.text_input("Password", type="password", key="li_p")
+        st.warning("MOCK PW only, it is PLAINTEXT!!, secure lgin will be implementet late!!!")
         if st.button("Login"):
             uid, err = do_login(db, li_user, li_pw)
             if err:
