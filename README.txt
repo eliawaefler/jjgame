@@ -10,3 +10,13 @@ jj game
 # │ ├─ online.html # online matchmaking screen
 # │ └─ friend.html # invite/join by username
 # └─ requirements.txt # fastapi, uvicorn
+
+
+
+# -----------------------------
+# Run
+# -----------------------------
+# 1) python -m venv .venv && . .venv/bin/activate
+# 2) pip install -r requirements.txt
+# 3) uvicorn app:app --reload --host 0.0.0.0 --port 8000
+# Deploy: fly.io / railway render as a standard ASGI app.

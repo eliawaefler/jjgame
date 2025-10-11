@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Friend Mode</title></head>
+<body>
+  <h2>Friend Match</h2>
+  <button onclick="offer()">Offer game (share your ID)</button>
+  <input id="tid" placeholder="friend user_id">
+  <button onclick="accept()">Accept friend ID</button>
+  <div id="s">-</div>
+<script>
+const uid = localStorage.getItem('uid');
+function offer(){ const ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws/friend'); ws.onopen=()=>ws.send(JSON.stringify({mode:'offer', user_id:uid})); ws.onmessage=(e)=>{ const m=JSON.parse(e.data); document.getElementById('s').textContent=JSON.stringify(m) } }
+function accept(){ const t=document.getElementById('tid').value; const ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws/friend'); ws.onopen=()=>ws.send(JSON.stringify({mode:'accept', user_id:uid, target_id:t})); ws.onmessage=(e)=>{ document.getElementById('s').textContent=e.data } }
+</script>
+</body></html>

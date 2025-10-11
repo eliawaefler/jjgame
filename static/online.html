@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Online Queue</title></head>
+<body>
+  <h2>Online Matchmaking</h2>
+  <div id="status">Connecting…</div>
+  <div id="round" style="display:none">
+    <h3>Prompt: <span id="prompt"></span></h3>
+    <button id="c1"></button>
+    <button id="c2"></button>
+  </div>
+<script>
+const uid = localStorage.getItem('uid');
+const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+ '://'+location.host+'/ws/online');
+ws.onopen = ()=> ws.send(JSON.stringify({user_id: uid}));
+ws.onmessage = (ev)=>{
+  const m = JSON.parse(ev.data);
+  if(m.type==='queued') document.getElementById('status').textContent='Waiting…';
+  if(m.type==='matched'){ document.getElementById('status').textContent='Matched vs '+m.peer; }
+  if(m.type==='round'){
+    document.getElementById('round').style.display='block';
+    document.getElementById('prompt').textContent=m.prompt;
+    const [a,b]=m.choices; const c1=document.getElementById('c1'), c2=document.getElementById('c2');
+    c1.textContent=a; c2.textContent=b;
+    c1.onclick=()=> ws.send(JSON.stringify({type:'choice', choice:a}));
+    c2.onclick=()=> ws.send(JSON.stringify({type:'choice', choice:b}));
+  }
+  if(m.type==='result'){
+    document.getElementById('status').textContent = 'Winner: '+m.winner+' (prompt '+m.prompt+')';
+  }
+  if(m.type==='timeout'){ document.getElementById('status').textContent='No answer. Round timeout.' }
+}
+</script>
+</body></html>

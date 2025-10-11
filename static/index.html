@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>RPS-Kahoot MVP</title></head>
+<body>
+  <h1>RPS-Kahoot MVP</h1>
+  <section>
+    <button onclick="guest()">Continue as Guest</button>
+    <input id="u" placeholder="username"><input id="p" placeholder="password" type="password">
+    <button onclick="signup()">Sign up</button>
+    <button onclick="login()">Login</button>
+  </section>
+  <hr>
+  <nav>
+    <a id="playOnline" href="#" onclick="go('/online')">Play Online</a> |
+    <a id="playFriend" href="#" onclick="go('/friend')">Play Friend</a> |
+    <a id="logs" href="#" onclick="viewLogs()">Analyse</a>
+  </nav>
+  <pre id="out"></pre>
+<script>
+let user_id = localStorage.getItem('uid')||'';
+const out = document.getElementById('out');
+function setUid(uid){ user_id=uid; localStorage.setItem('uid',uid); out.textContent='Logged in as '+uid; }
+async function guest(){ const r=await fetch('/guest',{method:'POST'}).then(r=>r.json()); setUid(r.user_id) }
+async function signup(){ const u=uEl().value,p=pEl().value; const r=await fetch(`/signup?username=${u}&password=${p}`,{method:'POST'}).then(r=>r.json()); if(r.ok) setUid(r.user_id); else out.textContent='Username taken'; }
+async function login(){ const u=uEl().value,p=pEl().value; const r=await fetch(`/login?username=${u}&password=${p}`,{method:'POST'}).then(r=>r.json()); if(r.ok) setUid(r.user_id); else out.textContent='Bad creds'; }
+function uEl(){return document.getElementById('u')} function pEl(){return document.getElementById('p')}
+function go(path){ if(!user_id){ out.textContent='Login or guest first'; return } window.location=path }
+async function viewLogs(){ if(!user_id){out.textContent='Login first';return} const r=await fetch('/logs?user_id='+user_id).then(r=>r.json()); out.textContent=JSON.stringify(r.logs,null,2); }
+if(user_id){ out.textContent='Logged in as '+user_id }
+</script>
+</body></html>
