@@ -183,7 +183,7 @@ page = st.sidebar.radio("Menü", ["Home", "Play online", "Play friend", "Analyse
 if page == "Logout":
     st.session_state.uid = None
     st.session_state.username = None
-    st.experimental_rerun()
+    st.rerun()
 
 st.caption(f"Angemeldet als **{st.session_state.username}**")
 
