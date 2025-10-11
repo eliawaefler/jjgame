@@ -1,14 +1,7 @@
 {
-  "users": {
-    "Elia": {
-      "password": "1234",
-      "id": "cbf2d18a-3bf0-49ad-8a4a-28fce8b730ea"
-    }
-  },
+  "users": {},
   "queues": [],
   "invites": [],
   "games": {},
-  "game_logs": {
-    "cbf2d18a-3bf0-49ad-8a4a-28fce8b730ea": []
-  }
+  "game_logs": {}
 }
