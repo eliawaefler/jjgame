@@ -8,7 +8,7 @@ from typing import Optional, Dict
 @dataclass
 class Waiter:
     user_id: str
-    websocket: Any  # set at runtime
+    websocket: any  # set at runtime
 
 class Matchmaker:
     def __init__(self):

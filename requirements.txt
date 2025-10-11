@@ -1,5 +1,2 @@
-# -----------------------------
-# requirements.txt
-# -----------------------------
-fastapi==0.115.2
-uvicorn==0.30.6
+streamlit
+pandas
