@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JJGame — RPS</title>
+  <link rel="preconnect" href="/static/app.js" />
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;max-width:840px;margin:32px auto;padding:0 16px}
+    header{display:flex;justify-content:space-between;align-items:center}
+    .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin:12px 0;box-shadow:0 2px 6px rgba(0,0,0,.05)}
+    button{padding:10px 14px;border-radius:10px;border:1px solid #ccc;background:#fff;cursor:pointer}
+    button.primary{border-color:#444;background:#111;color:#fff}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .col{flex:1 1 240px}
+    .muted{color:#666;font-size:.9em}
+    .score{font-size:1.3em}
+    #gameArea{display:none}
+    .opts{display:flex;gap:12px;margin-top:8px}
+    .badge{display:inline-block;padding:2px 8px;border:1px solid #aaa;border-radius:999px;font-size:.8em}
+    .ok{color:#0a0}
+    .err{color:#c00}
+    pre{white-space:pre-wrap;word-break:break-word;background:#f7f7f7;padding:8px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <header>
+    <h2>JJGame — Rock • Paper • Scissors</h2>
+    <div id="userBadge" class="badge">not logged in</div>
+  </header>
+
+  <section class="card" id="loginCard">
+    <h3>Login (mock)</h3>
+    <div class="row">
+      <div class="col">
+        <input id="username" placeholder="username" />
+      </div>
+      <div class="col">
+        <button class="primary" id="btnLogin">Login</button>
+      </div>
+    </div>
+    <div class="muted">Es wird nur ein Token generiert.</div>
+  </section>
+
+  <section class="card" id="menuCard" style="display:none">
+    <h3>Hauptmenü</h3>
+    <div class="row">
+      <button id="btnSingle" class="primary">Single Player</button>
+      <button id="btnOnline">Online Match</button>
+      <button id="btnStats">View Stats</button>
+      <button id="btnLogout">Logout</button>
+    </div>
+    <div id="stats" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card" id="gameArea">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div id="roomInfo" class="muted"></div>
+      <div class="score">Score: <span id="score">0</span></div>
+    </div>
+    <h3>Situation: <span id="situation">—</span></h3>
+    <div class="opts">
+      <button id="opt1">-</button>
+      <button id="opt2">-</button>
+      <button id="btnAbort" style="margin-left:auto">Abort</button>
+    </div>
+    <div id="log" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>Debug</summary>
+      <pre id="debug"></pre>
+    </details>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "blue":  { "pos":[-1,0,-1], "roll":0,
+    "dir_changes": {
+      "legUpperL":[1,1,1], "legUpperR":[1,1,1],
+      "legLowerL":[1,1,1], "legLowerR":[1,1,1],
+      "armUpperL":[1,0.99,1.1], "armUpperR":[1,0.99,1.1],
+      "forearmL":[1,0.99,0.9],  "forearmR":[1,0.99,0.9]
+    }
+  },
+  "white": { "pos":[1,0,1], "roll":0,
+    "dir_changes": {
+      "legUpperL":[1,1,1], "legUpperR":[1,1,1],
+      "legLowerL":[1,1,1], "legLowerR":[1,1,1],
+      "armUpperL":[1,0.99,1.1], "armUpperR":[1,0.99,1.1],
+      "forearmL":[1,0.99,0.9],  "forearmR":[1,0.99,0.9]
+    }
+}

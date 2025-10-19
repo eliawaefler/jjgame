@@ -1,0 +1,268 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"/><title>display_stickfigure</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden}
+  #wrap{position:fixed;inset:0}
+  #room{position:absolute;inset:0;border:0}
+  #ui{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.6);color:#eee;font:12px system-ui;padding:10px;border-radius:8px;z-index:2;max-width:520px}
+  #ui .row{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}
+  #warn{color:#ffcd4d;margin-left:6px}
+  input[type=range]{width:120px}
+  input[type=number]{width:70px}
+</style>
+</head><body>
+<div id="wrap">
+  <iframe id="room" src="./dojo_room.html" allow="pointer-lock"></iframe>
+  <div id="ui">
+    <div class="row"><b>display_stickfigure</b><span id="warn"></span></div>
+    <div class="row">
+      <label>Figure
+        <select id="fig"><option value="blue">Blue</option><option value="white">White</option></select>
+      </label>
+      <label>H (m) <input id="inH" type="number" step="0.01" readonly></label>
+      <label>Spine roll° <input id="inRoll" type="number" step="1" value="0"></label>
+    </div>
+    <div class="row">
+      <label>X <input id="inX" type="number" step="0.01"></label>
+      <label>Y <input id="inY" type="number" step="0.01"></label>
+      <label>Z <input id="inZ" type="number" step="0.01"></label>
+      <button id="btnPose">Modify pose</button>
+      <button id="savePos">Save POS</button>
+      <label>Load POS <input id="loadPos" type="file" accept=".json"></label>
+    </div>
+    <div id="panel" style="display:none">
+      <div class="row"><b>dir_changes (component-wise scale of base vectors)</b> &nbsp;<small>slider −10…+10 → factor = 1 + v/100</small></div>
+      <div class="row" id="sliders"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+// --- config filenames ---
+const FILES = {
+  proportions: 'base_proportions.json',
+  base:        'base_pos.json',
+  bodyBlue:    'body_blue.json',
+  bodyWhite:   'body_white.json',
+  init:        'init_pos.json'
+};
+
+// --- helpers ---
+const warn = (msg)=>{document.getElementById('warn').textContent = msg||'';};
+const clamp2 = n=>Math.round(n*100)/100;
+const sliderSpec = [
+  'legUpperL','legUpperR','legLowerL','legLowerR',
+  'armUpperL','armUpperR','forearmL','forearmR'
+]; // vectors with 3 comps each
+
+// --- wait for dojo_room ---
+const iframe = document.getElementById('room');
+await new Promise(res=>iframe.addEventListener('load',res,{once:true}));
+const DOJO = iframe.contentWindow.DOJO;
+const { THREE, scene, camera, renderer } = DOJO;
+
+// --- data/state ---
+let PROPS = {
+  hDiv:7.5, legUpper:1.5, legLower:2.0, spine:2.5, head:1.0,
+  hipHalf:0.5, shoulderHalf:1.0, armUpper:1.5, forearm:1.5,
+  footLen:1.0, noseLen:0.5, forward:[0,0,1]
+};
+let BASE = {
+  legUpperL:[-0.25,-1,0], legUpperR:[0.25,-1,0],
+  legLowerL:[ 0.00,-1,0], legLowerR:[0.00,-1,0],
+  spine:[0,1,0], head:[0,1,0],
+  armUpperL:[-1,0,0], armUpperR:[1,0,0],
+  forearmL:[-1,0,0],  forearmR:[1,0,0]
+}; // legs straight down
+
+const figs = {
+  blue: { h:1.72, pos:new THREE.Vector3(-1,0,-1), roll:0,
+          dir_changes: makeDirChanges() },
+  white:{ h:1.68, pos:new THREE.Vector3( 1,0, 1), roll:0,
+          dir_changes: makeDirChanges() }
+};
+
+// --- geometry (line segments) ---
+function segBuf(n){ const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(n*2*3),3)); return g; }
+function makeFigure(color){ const geo=segBuf(18); const mat=new THREE.LineBasicMaterial({color}); return {geo, line:new THREE.LineSegments(geo,mat)};}
+const meshes={ blue:makeFigure(0x0066ff), white:makeFigure(0xffffff) };
+scene.add(meshes.blue.line, meshes.white.line);
+
+// --- math helpers ---
+const V = a => new THREE.Vector3(a[0],a[1],a[2]);
+const unit = v => (v.lengthSq()? v.normalize() : v.set(0,1,0));
+const mulComp = (v, sVec) => new THREE.Vector3(v.x*sVec.x, v.y*sVec.y, v.z*sVec.z);
+
+// make dir_changes default (all 1s)
+function makeDirChanges(){
+  const o={}; sliderSpec.forEach(k=>o[k]=[1,1,1]); return o;
+}
+function factorFromSlider(v){ return 1 + (Number(v)||0)/100; } // v in [-10,10]
+
+// compute effective base dir with component-wise scaling and torso roll
+function effDir(baseArr, scaleArr, qTorso){
+  const base = V(baseArr);
+  const s = new THREE.Vector3(scaleArr[0],scaleArr[1],scaleArr[2]);
+  const m = mulComp(base, s);
+  return unit(m.applyQuaternion(qTorso));
+}
+
+// rebuild figure
+function rebuild(name){
+  const f=figs[name], geo=meshes[name].geo, hU=f.h/PROPS.hDiv, fwd=unit(V(PROPS.forward));
+  const L_up=PROPS.legUpper*hU, L_lo=PROPS.legLower*hU, L_sp=PROPS.spine*hU, L_head=PROPS.head*hU,
+        L_shHalf=PROPS.shoulderHalf*hU, L_hipHalf=PROPS.hipHalf*hU,
+        L_armU=PROPS.armUpper*hU, L_armF=PROPS.forearm*hU, L_foot=PROPS.footLen*hU, L_nose=PROPS.noseLen*hU;
+
+  // spine dir + roll
+  const dirSpine=unit(V(BASE.spine));
+  const qSpine=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), dirSpine);
+  const qRoll=new THREE.Quaternion().setFromAxisAngle(dirSpine, (f.roll||0)*Math.PI/180);
+  const qTorso=qSpine.clone().multiply(qRoll);
+
+  const hipBase=f.pos.clone();
+  const neckBase=hipBase.clone().add(dirSpine.clone().applyQuaternion(qRoll).multiplyScalar(L_sp));
+
+  // fixed bars
+  const hipL=hipBase.clone().add(new THREE.Vector3(-L_hipHalf,0,0).applyQuaternion(qTorso));
+  const hipR=hipBase.clone().add(new THREE.Vector3( L_hipHalf,0,0).applyQuaternion(qTorso));
+  const shL =neckBase.clone().add(new THREE.Vector3(-L_shHalf,0,0).applyQuaternion(qTorso));
+  const shR =neckBase.clone().add(new THREE.Vector3( L_shHalf,0,0).applyQuaternion(qTorso));
+
+  // legs (component-wise scaled base dirs)
+  const d=f.dir_changes;
+  const dirLegUL = effDir(BASE.legUpperL, d.legUpperL, qTorso);
+  const dirLegUR = effDir(BASE.legUpperR, d.legUpperR, qTorso);
+  const dirLegLL = effDir(BASE.legLowerL, d.legLowerL, qTorso);
+  const dirLegLR = effDir(BASE.legLowerR, d.legLowerR, qTorso);
+  // arms
+  const dirArmUL = effDir(BASE.armUpperL, d.armUpperL, qTorso);
+  const dirArmUR = effDir(BASE.armUpperR, d.armUpperR, qTorso);
+  const dirArmFL = effDir(BASE.forearmL,  d.forearmL,  qTorso);
+  const dirArmFR = effDir(BASE.forearmR,  d.forearmR,  qTorso);
+  // head (locked to spine dir)
+  const dirHead = unit(V(BASE.head).applyQuaternion(qTorso));
+
+  // chain points
+  const kneeL=hipL.clone().add(dirLegUL.clone().multiplyScalar(L_up));
+  const footL=kneeL.clone().add(dirLegLL.clone().multiplyScalar(L_lo));
+  const kneeR=hipR.clone().add(dirLegUR.clone().multiplyScalar(L_up));
+  const footR=kneeR.clone().add(dirLegLR.clone().multiplyScalar(L_lo));
+  const elbowL=shL.clone().add(dirArmUL.clone().multiplyScalar(L_armU));
+  const handL =elbowL.clone().add(dirArmFL.clone().multiplyScalar(L_armF));
+  const elbowR=shR.clone().add(dirArmUR.clone().multiplyScalar(L_armU));
+  const handR =elbowR.clone().add(dirArmFR.clone().multiplyScalar(L_armF));
+  const headTop=neckBase.clone().add(dirHead.clone().multiplyScalar(L_head));
+
+  // feet forward proj
+  const footEnd=(ankle, dLower)=>{const comp=dLower.clone().multiplyScalar(fwd.dot(dLower)); const v=fwd.clone().sub(comp); if(v.lengthSq()<1e-6) v.set(0,0,1).sub(comp); v.normalize().multiplyScalar(L_foot); return ankle.clone().add(v);};
+  const toeL=footEnd(footL,dirLegLL), toeR=footEnd(footR,dirLegLR);
+
+  // nose
+  const headMid=neckBase.clone().add(dirHead.clone().multiplyScalar(L_head*0.5));
+  const compH=dirHead.clone().multiplyScalar(fwd.dot(dirHead)); const noseDir=fwd.clone().sub(compH); if(noseDir.lengthSq()<1e-6) noseDir.set(0,0,1).sub(compH); noseDir.normalize();
+  const noseTip=headMid.clone().add(noseDir.multiplyScalar(L_nose));
+
+  // write segments (18)
+  const P=new Float32Array([
+    hipL.x,hipL.y,hipL.z, hipR.x,hipR.y,hipR.z,                   // hips bar
+    hipBase.x,hipBase.y,hipBase.z, neckBase.x,neckBase.y,neckBase.z, // spine
+    hipL.x,hipL.y,hipL.z, kneeL.x,kneeL.y,kneeL.z,
+    kneeL.x,kneeL.y,kneeL.z, footL.x,footL.y,footL.z,
+    hipR.x,hipR.y,hipR.z, kneeR.x,kneeR.y,kneeR.z,
+    kneeR.x,kneeR.y,kneeR.z, footR.x,footR.y,footR.z,
+    neckBase.x,neckBase.y,neckBase.z, shL.x,shL.y,shL.z,
+    neckBase.x,neckBase.y,neckBase.z, shR.x,shR.y,shR.z,
+    shL.x,shL.y,shL.z, elbowL.x,elbowL.y,elbowL.z,
+    elbowL.x,elbowL.y,elbowL.z, handL.x,handL.y,handL.z,
+    shR.x,shR.y,shR.z, elbowR.x,elbowR.y,elbowR.z,
+    elbowR.x,elbowR.y,elbowR.z, handR.x,handR.y,handR.z,
+    neckBase.x,neckBase.y,neckBase.z, headTop.x,headTop.y,headTop.z,
+    footL.x,footL.y,footL.z, toeL.x,toeL.y,toeL.z,
+    footR.x,footR.y,footR.z, toeR.x,toeR.y,toeR.z,
+    headMid.x,headMid.y,headMid.z, noseTip.x,noseTip.y,noseTip.z
+  ]);
+  geo.attributes.position.array.set(P);
+  geo.attributes.position.needsUpdate = true;
+  geo.computeBoundingSphere();
+}
+
+// --- UI wiring ---
+const $ = id => document.getElementById(id);
+const figSel=$('fig'), inH=$('inH'), inX=$('inX'), inY=$('inY'), inZ=$('inZ'), inRoll=$('inRoll');
+const slidersBox = $('sliders');
+function loadUI(name){
+  const f=figs[name];
+  inH.value=f.h.toFixed(2); inX.value=clamp2(f.pos.x); inY.value=clamp2(f.pos.y); inZ.value=clamp2(f.pos.z); inRoll.value=f.roll||0;
+  // sync sliders
+  slidersBox.querySelectorAll('input[type=range]').forEach(r=>{
+    const [k,c] = r.dataset.key.split('.');
+    const v = (f.dir_changes[k]||[1,1,1])[{x:0,y:1,z:2}[c]];
+    r.value = Math.round((v-1)*100); // inverse mapping
+    r.nextElementSibling.value = (1 + Number(r.value)/100).toFixed(2);
+  });
+}
+figSel.onchange = ()=>loadUI(figSel.value);
+[inX,inY,inZ].forEach(el=>el.oninput=()=>{const f=figs[figSel.value]; f.pos.set(+inX.value,+inY.value,+inZ.value); rebuild(figSel.value);});
+inRoll.oninput = ()=>{figs[figSel.value].roll=+inRoll.value; rebuild(figSel.value);};
+
+$('btnPose').onclick=()=>{ const p=$('panel'); p.style.display = (p.style.display==='none'?'block':'none'); };
+
+// sliders create
+function addSlider(label, key){
+  ['x','y','z'].forEach(c=>{
+    const wrap=document.createElement('div'); wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.gap='6px';
+    const span=document.createElement('span'); span.textContent=`${label}.${c}`;
+    const r=document.createElement('input'); r.type='range'; r.min=-10; r.max=10; r.step=1; r.value=0; r.dataset.key=`${key}.${c}`;
+    const val=document.createElement('input'); val.type='number'; val.step='0.01'; val.value='1.00'; val.readOnly=true; val.style.width='55px';
+    r.oninput=()=>{ const f=figs[figSel.value]; const [k,cc]=r.dataset.key.split('.'); const idx={x:0,y:1,z:2}[cc];
+      f.dir_changes[k][idx] = factorFromSlider(r.value); val.value=f.dir_changes[k][idx].toFixed(2); rebuild(figSel.value); };
+    wrap.append(span,r,val); slidersBox.appendChild(wrap);
+  });
+}
+sliderSpec.forEach(k=>addSlider(k,k));
+
+// save/load pos
+$('savePos').onclick=()=>{
+  const out={
+    blue:{pos:[clamp2(figs.blue.pos.x),clamp2(figs.blue.pos.y),clamp2(figs.blue.pos.z)], roll:figs.blue.roll, dir_changes:figs.blue.dir_changes},
+    white:{pos:[clamp2(figs.white.pos.x),clamp2(figs.white.pos.y),clamp2(figs.white.pos.z)], roll:figs.white.roll, dir_changes:figs.white.dir_changes},
+    saved_at:new Date().toISOString()
+  };
+  const ts=new Date(), pad=n=>String(n).padStart(2,'0');
+  const fn=`pos_${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}_${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}.json`;
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,2)],{type:'application/json'})); a.download=fn; a.click(); URL.revokeObjectURL(a.href);
+};
+$('loadPos').onchange=async(e)=>{
+  const f=e.target.files[0]; if(!f) return;
+  const j=JSON.parse(await f.text());
+  if(j.blue){figs.blue.pos=new THREE.Vector3(...j.blue.pos); figs.blue.roll=j.blue.roll||0; figs.blue.dir_changes = {...makeDirChanges(), ...(j.blue.dir_changes||{})};}
+  if(j.white){figs.white.pos=new THREE.Vector3(...j.white.pos); figs.white.roll=j.white.roll||0; figs.white.dir_changes= {...makeDirChanges(), ...(j.white.dir_changes||{})};}
+  rebuild('blue'); rebuild('white'); loadUI(figSel.value);
+};
+
+// --- load JSONs (default to init_pos; warn on missing files) ---
+async function j(path){ const r=await fetch(`./${path}`); if(!r.ok) throw new Error(path); return r.json(); }
+(async()=>{
+  try { PROPS = await j(FILES.proportions); } catch(e){ warn('⚠ missing base_proportions.json'); }
+  try { BASE  = await j(FILES.base); }        catch(e){ warn('⚠ missing base_pos.json'); }
+  try { figs.blue.h  = (await j(FILES.bodyBlue)).height/100; } catch(e){ warn(' ⚠ body_blue.json'); }
+  try { figs.white.h = (await j(FILES.bodyWhite)).height/100; } catch(e){ warn(' ⚠ body_white.json'); }
+  // init_pos (required by default)
+  try {
+    const init = await j(FILES.init);
+    if(init.blue){
+      figs.blue.pos = new THREE.Vector3(...init.blue.pos);
+      figs.blue.roll= init.blue.roll||0;
+      figs.blue.dir_changes = {...makeDirChanges(), ...(init.blue.dir_changes||{})};
+    }
+    if(init.white){
+      figs.white.pos = new THREE.Vector3(...init.white.pos);
+      figs.white.roll= init.white.roll||0;
+      figs.white.dir_changes = {...makeDirChanges(), ...(init.white.dir_changes||{})};
+    }
+  } catch(e){ warn(' ⚠ init_pos.json not found'); }
+  rebuild('blue'); rebuild('white'); loadUI('blue');
+})();
+</script>
+</body></html>

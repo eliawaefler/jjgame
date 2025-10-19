@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>VideoPose3D Viewer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b0e11; --fg:#e7e9ee; --muted:#9aa3b2; --accent:#4aa3ff; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: var(--bg); color: var(--fg); }
+    header { padding: 12px 16px; border-bottom: 1px solid #222; display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+    header label { font-size: 13px; color: var(--muted); margin-right: 6px; }
+    header input[type="file"] { color: var(--fg); }
+    header .spacer { flex: 1; }
+    html, body { height: 100%; }
+    body { display:flex; flex-direction:column; }
+    main { flex:1; min-height:0; display: flex; gap: 12px; padding: 12px; }
+    .left, .right { display: flex; flex-direction: column; gap: 8px; }
+    .left { flex: 1; min-width: 360px; }
+    .right.sidebar { width: 340px; min-width: 300px; }
+    .display { flex:1; min-height:0; display:flex; gap:8px; }
+    .display.landscape { flex-direction: column; }
+    .display.portrait { flex-direction: row; }
+    #canvas3d { width: 100%; height: 100%; background: #0f1319; border:1px solid #1a1f27; border-radius: 8px; }
+    .controls { display: flex; align-items: center; gap: 8px; padding: 8px; background:#0f1217; border:1px solid #1a1f27; border-radius:8px; }
+    .controls button, .controls input[type="range"] { accent-color: var(--accent); }
+    .controls button { background:#141a22; color:var(--fg); border:1px solid #1a1f27; padding:6px 10px; border-radius:6px; cursor:pointer; }
+    .controls button:hover { background:#18212b; }
+    .readout { font-size: 12px; color: var(--muted); min-width: 180px; }
+    video { width: 100%; max-height: 520px; background:#000; border:1px solid #1a1f27; border-radius:8px; }
+    .meta { font-size: 12px; color: var(--muted); }
+    .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .hint { font-size: 12px; color:#7e8796; }
+  </style>
+  <noscript>This viewer needs JavaScript enabled.</noscript>
+</head>
+<body>
+  <header>
+    <div class="row">
+      <label for="jsonFile">3D JSON</label>
+      <input type="file" id="jsonFile" accept="application/json" />
+    </div>
+    <div class="row">
+      <label for="videoFile">(Optional) Video</label>
+      <input type="file" id="videoFile" accept="video/*" />
+    </div>
+    <div class="spacer"></div>
+    <div class="meta" id="meta">No file loaded</div>
+  </header>
+
+  <main>
+    <section class="left">
+      <div class="display landscape" id="display"> 
+        <div id="videoWrap" style="flex:1; display:flex; align-items:center; justify-content:center;">
+          <video id="video" controls playsinline style="width:100%; height:100%; object-fit:contain; background:#000; border:1px solid #1a1f27; border-radius:8px;"></video>
+        </div>
+        <div id="canvasWrap" style="flex:1; display:flex; align-items:center; justify-content:center;">
+          <canvas id="canvas3d"></canvas>
+        </div>
+      </div>
+      <div class="hint">Tip: Drag in the canvas to rotate. Mouse wheel to zoom.</div>
+    </section>
+    <section class="right sidebar">
+      <div class="controls" style="flex-direction:column; align-items:stretch; gap:10px;">
+        <div style="font-weight:600">Playback</div>
+        <div class="row">
+          <button id="playBtn">Play</button>
+          <button id="prevBtn">&laquo;</button>
+          <button id="nextBtn">&raquo;</button>
+          <label class="hint" style="margin-left:auto;"><input type="checkbox" id="syncVideo"> Sync to Video</label>
+        </div>
+        <input id="slider" type="range" min="0" max="0" step="1" value="0" />
+        <div class="readout" id="readout">Frame - / - (0.00s)</div>
+      </div>
+      <div class="controls" style="flex-direction:column; align-items:stretch; gap:10px;">
+        <div style="font-weight:600">Transform Points</div>
+        <div class="row">
+          <label class="hint">Flip:</label>
+          <label><input type="checkbox" id="flipX"> X</label>
+          <label><input type="checkbox" id="flipY"> Y</label>
+          <label><input type="checkbox" id="flipZ"> Z</label>
+        </div>
+        <div class="row">
+          <label class="hint" for="scale3d">Scale (s or sx,sy,sz):</label>
+          <input id="scale3d" type="text" placeholder="1 or 1,1,1" style="flex:1; min-width:140px;" />
+        </div>
+        <div class="row">
+          <label class="hint" for="translate3d">Translate (dx,dy,dz):</label>
+          <input id="translate3d" type="text" placeholder="0,0,0" style="flex:1; min-width:140px;" />
+        </div>
+        <div class="row">
+          <label class="hint" for="pivot3d">Pivot (x,y,z):</label>
+          <input id="pivot3d" type="text" placeholder="auto-center" style="flex:1; min-width:140px;" />
+          <label class="hint"><input type="checkbox" id="livePreview" checked> Live preview</label>
+        </div>
+        <div class="row">
+          <button id="applyTransformBtn">Apply</button>
+          <button id="resetTransformBtn">Reset</button>
+          <button id="downloadTransformedBtn" title="Download transformed JSON">Download JSON</button>
+        </div>
+        <div class="hint" id="cliHint">CLI: python pose_transform.py &lt;input.json&gt; --flip3d ...</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+  (function(){
+    const canvas = document.getElementById('canvas3d');
+    const ctx = canvas.getContext('2d');
+    const slider = document.getElementById('slider');
+    const readout = document.getElementById('readout');
+    const metaEl = document.getElementById('meta');
+    const playBtn = document.getElementById('playBtn');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const jsonFile = document.getElementById('jsonFile');
+    const videoFile = document.getElementById('videoFile');
+    const video = document.getElementById('video');
+    const syncVideoEl = document.getElementById('syncVideo');
+    // Transform UI elements
+    const flipXEl = document.getElementById('flipX');
+    const flipYEl = document.getElementById('flipY');
+    const flipZEl = document.getElementById('flipZ');
+    const scale3dEl = document.getElementById('scale3d');
+    const translate3dEl = document.getElementById('translate3d');
+    const pivot3dEl = document.getElementById('pivot3d');
+    const livePreviewEl = document.getElementById('livePreview');
+    const applyTransformBtn = document.getElementById('applyTransformBtn');
+    const resetTransformBtn = document.getElementById('resetTransformBtn');
+    const downloadTransformedBtn = document.getElementById('downloadTransformedBtn');
+    const cliHintEl = document.getElementById('cliHint');
+
+    let data = null; // {meta:{fps,width,height,layout}, frames:[{frame,points:[[x,y,z],..]}]}
+    let points = []; // Float32Array per frame: [x,y,z]*J (display)
+    let origPoints = []; // original immutable copy for transforms
+    let J = 0, T = 0, FPS = 25, layout = 'unknown';
+    let minV = [0,0,0], maxV = [0,0,0], scale = 1, center = [0,0,0];
+    let yaw = Math.PI*0.4, pitch = 0.15, dist = 3.0; // camera params
+    let playing = false;
+    let rafId = null;
+    let lastTime = 0;
+
+    const bonesByLayout = {
+      coco: [ [5,7],[7,9],[6,8],[8,10],[5,6],[11,13],[13,15],[12,14],[14,16],[11,12],[5,11],[6,12],[0,5],[0,6],[0,1],[1,2],[2,3],[0,4] ],
+      h36m: [ [0,1],[1,2],[2,3], [0,4],[4,5],[5,6], [0,7],[7,8],[8,9],[9,10], [8,11],[11,12],[12,13], [8,14],[14,15],[15,16] ]
+    };
+
+    function resizeCanvas(){
+      const parent = canvas.parentElement;
+      const w = parent.clientWidth || 640;
+      const h = parent.clientHeight || 520; // fill container; fallback
+      canvas.width = Math.floor(w * devicePixelRatio);
+      canvas.height = Math.floor(h * devicePixelRatio);
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+      drawFrame(parseInt(slider.value)||0);
+    }
+    window.addEventListener('resize', ()=>{ resizeCanvas(); updateDisplayOrientation(); });
+    updateDisplayOrientation(); updateDisplayOrientation(); });
+
+    function loadJSONFile(file){
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const obj = JSON.parse(e.target.result);
+          ingestJSON(obj);
+        } catch(err){
+          alert('Failed to parse JSON: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function loadVideoFile(file){
+      const url = URL.createObjectURL(file);
+      video.src = url;
+      video.pause();
+      video.currentTime = 0;
+    }
+
+    function ingestJSON(obj){
+      data = obj;
+      FPS = (data.meta && data.meta.fps) || 25;
+      layout = (data.meta && data.meta.layout) || 'unknown';
+      T = data.frames.length;
+      if (!data.frames.length || !data.frames[0].points){
+        alert('JSON missing frames/points'); return;
+      }
+      J = data.frames[0].points.length;
+      points = new Array(T);
+      // Compute global bounding box and center using joint 0 across frames
+      minV = [Infinity,Infinity,Infinity];
+      maxV = [-Infinity,-Infinity,-Infinity];
+      for(let t=0;t<T;t++){
+        const arr = data.frames[t].points;
+        const flat = new Float32Array(J*3);
+        for(let j=0;j<J;j++){
+          const p = arr[j];
+          const x = +p[0], y = +p[1], z = +p[2];
+          flat[j*3+0]=x; flat[j*3+1]=y; flat[j*3+2]=z;
+          if (x<minV[0]) minV[0]=x; if (y<minV[1]) minV[1]=y; if (z<minV[2]) minV[2]=z;
+          if (x>maxV[0]) maxV[0]=x; if (y>maxV[1]) maxV[1]=y; if (z>maxV[2]) maxV[2]=z;
+        }
+        points[t]=flat;
+        origPoints[t]=flat.slice(0);
+      }
+      // center on joint 0 at frame 0 if available
+      const c0 = [points[0][0], points[0][1], points[0][2]];
+      center = c0;
+      const span = [maxV[0]-minV[0], maxV[1]-minV[1], maxV[2]-minV[2]];
+      const maxSpan = Math.max(1e-6, Math.max(span[0], Math.max(span[1], span[2])));
+      scale = 1.0 / maxSpan; // normalized to unit cube
+      dist = 3.0;
+
+      slider.min = 0; slider.max = Math.max(0, T-1); slider.value = 0;
+      updateReadout(0);
+      metaEl.textContent = `Joints: ${J}, Frames: ${T}, FPS: ${FPS}, Layout: ${layout}`;
+      resizeCanvas();
+    updateDisplayOrientation();
+    }
+
+    function derivedVideoFPS(){
+      if (video && isFinite(video.duration) && video.duration > 0 && T > 0) {
+        return T / video.duration;
+      }
+      return FPS;
+    }
+
+    function updateReadout(frame){
+      let sec;
+      if (syncVideoEl && syncVideoEl.checked && video && isFinite(video.duration) && video.duration > 0) {
+        sec = (frame / T * video.duration).toFixed(2);
+      } else {
+        sec = (frame / FPS).toFixed(2);
+      }
+      readout.textContent = `Frame ${frame+1} / ${T} (${sec}s)`;
+    }
+
+    function rotateAndProject(p){
+      // p: [x,y,z] in world units (mm-ish), centered
+      const x = p[0]-center[0];
+      const y = p[1]-center[1];
+      const z = p[2]-center[2];
+      // scale to unit-ish
+      let X = x*scale, Y = -y*scale, Z = z*scale; // invert Y for screen
+      // yaw (around Y), then pitch (around X)
+      const cy = Math.cos(yaw), sy = Math.sin(yaw);
+      const cp = Math.cos(pitch), sp = Math.sin(pitch);
+      // yaw
+      let x1 = cy*X + sy*Z;
+      let z1 = -sy*X + cy*Z;
+      // pitch
+      let y2 = cp*Y - sp*z1;
+      let z2 = sp*Y + cp*z1;
+      // perspective
+      const f = 0.9; // focal length in NDC
+      const denom = (z2 + dist);
+      const px = (f * x1) / denom;
+      const py = (f * y2) / denom;
+      const depth = z2; // for depth shading
+      return [px, py, depth];
+    }
+
+    function updateDisplayOrientation(){
+      const display = document.getElementById('display');
+      if (!display) return;
+      if (video && isFinite(video.videoWidth) && isFinite(video.videoHeight) && video.videoHeight > 0) {
+        if (video.videoHeight > video.videoWidth) {
+          display.classList.remove('landscape');
+          display.classList.add('portrait');
+        } else {
+          display.classList.remove('portrait');
+          display.classList.add('landscape');
+        }
+      } else {
+        display.classList.remove('portrait');
+        display.classList.add('landscape');
+      }
+      resizeCanvas();
+    }
+
+    function drawFrame(frame){
+      if (!points.length) return;
+      frame = Math.max(0, Math.min(T-1, frame|0));
+      const W = canvas.width, H = canvas.height;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle = '#0f1319';
+      ctx.fillRect(0,0,W,H);
+
+      const joints = points[frame];
+      const proj = new Array(J);
+      for (let j=0;j<J;j++){
+        const p = [joints[j*3+0], joints[j*3+1], joints[j*3+2]];
+        proj[j] = rotateAndProject(p);
+      }
+      const sx = W*0.5, sy = H*0.5;
+      const bones = bonesByLayout[layout] || bonesByLayout.h36m;
+      ctx.lineWidth = Math.max(1, Math.floor(Math.min(W,H) / 400));
+      for (const [a,b] of bones){
+        const pa = proj[a], pb = proj[b]; if (!pa || !pb) continue;
+        const za = pa[2], zb = pb[2];
+        const shade = Math.max(0.2, Math.min(1.0, (dist - (za+zb)*0.5) / (dist + 1e-3)));
+        ctx.strokeStyle = `rgba(74,163,255,${shade.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.moveTo(sx + pa[0]*sx, sy + pa[1]*sx);
+        ctx.lineTo(sx + pb[0]*sx, sy + pb[1]*sx);
+        ctx.stroke();
+      }
+      for (let j=0;j<J;j++){
+        const p = proj[j];
+        const r = Math.max(2, Math.floor(Math.min(W,H) / 200));
+        const shade = Math.max(0.3, Math.min(1.0, (dist - p[2]) / (dist + 1e-3)));
+        ctx.fillStyle = `rgba(255,255,255,${shade.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(sx + p[0]*sx, sy + p[1]*sx, r, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
+    FUNCTION_MARKER(';frame){
+      if (!points.length) return;
+      frame = Math.max(0, Math.min(T-1, frame|0));
+      const W = canvas.width, H = canvas.height;
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(0,0,W,H);
+      // background grid/axes
+      ctx.fillStyle = '#0f1319';
+      ctx.fillRect(0,0,W,H);
+
+      const joints = points[frame];
+      const proj = new Array(J);
+      for(let j=0;j<J;j++){
+        const p = [joints[j*3+0], joints[j*3+1], joints[j*3+2]];
+        proj[j] = rotateAndProject(p);
+      }
+      // map to canvas
+      const sx = W*0.5, sy = H*0.5;
+      // draw bones
+      const bones = bonesByLayout[layout] || bonesByLayout.h36m;
+      ctx.lineWidth = Math.max(1, Math.floor(Math.min(W,H) / 400));
+      for (const [a,b] of bones){
+        const pa = proj[a], pb = proj[b]; if (!pa || !pb) continue;
+        const za = pa[2], zb = pb[2];
+        const shade = Math.max(0.2, Math.min(1.0, (dist - (za+zb)*0.5) / (dist + 1e-3)));
+        ctx.strokeStyle = `rgba(74,163,255,${shade.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.moveTo(sx + pa[0]*sx, sy + pa[1]*sx);
+        ctx.lineTo(sx + pb[0]*sx, sy + pb[1]*sx);
+        ctx.stroke();
+      }
+      // draw joints
+      for (let j=0;j<J;j++){
+        const p = proj[j];
+        const r = Math.max(2, Math.floor(Math.min(W,H) / 200));
+        const shade = Math.max(0.3, Math.min(1.0, (dist - p[2]) / (dist + 1e-3)));
+        ctx.fillStyle = `rgba(255,255,255,${shade.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(sx + p[0]*sx, sy + p[1]*sx, r, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+    function setFrame(i){
+      i = Math.max(0, Math.min(T-1, i|0));
+      slider.value = i;
+      updateReadout(i);
+      drawFrame(i);
+      if (video.src && isFinite(video.duration)){
+        if (syncVideoEl && syncVideoEl.checked) {
+          const t = (T>0 ? (i / T) * video.duration : 0);
+          if (Math.abs((video.currentTime||0) - t) > 0.02){
+            video.currentTime = Math.min(video.duration-0.001, t);
+          }
+        } else {
+          const t = i / FPS;
+          if (Math.abs((video.currentTime||0) - t) > 0.02){
+            video.currentTime = Math.min(video.duration-0.001, t);
+          }
+        }
+      }
+    }
+
+        function playLoop(ts){
+      if (!playing) return;
+      if (!lastTime) lastTime = ts;
+      if (syncVideoEl && syncVideoEl.checked && video && isFinite(video.duration) && video.duration > 0) {
+        const curTime = video.currentTime || 0;
+        const idx = Math.max(0, Math.min(T-1, Math.round((curTime / video.duration) * T)));
+        setFrame(idx);
+      } else {
+        const dt = (ts - lastTime) / 1000; // seconds
+        const step = dt * FPS;
+        const cur = parseInt(slider.value) || 0;
+        let next = cur + step;
+        if (next >= T){ next = 0; }
+        setFrame(next|0);
+      }
+      lastTime = ts;
+      rafId = requestAnimationFrame(playLoop);
+    }
+    // UI wiring
+    slider.addEventListener('input', () => setFrame(parseInt(slider.value)||0));
+    playBtn.addEventListener('click', () => {
+      playing = !playing;
+      playBtn.textContent = playing ? 'Pause' : 'Play';
+      lastTime = 0;
+      if (playing){ rafId = requestAnimationFrame(playLoop); } else { cancelAnimationFrame(rafId); }
+      if (video.src){ if (playing){ video.play(); } else { video.pause(); } }
+    });
+    prevBtn.addEventListener('click', ()=> setFrame((parseInt(slider.value)||0) - 1));
+    nextBtn.addEventListener('click', ()=> setFrame((parseInt(slider.value)||0) + 1));
+    jsonFile.addEventListener('change', (e)=>{ const f=e.target.files[0]; if (f) loadJSONFile(f); });
+    videoFile.addEventListener('change', (e)=>{ const f=e.target.files[0]; if (f) loadVideoFile(f); });
+    // Update frame selection from video time when syncing
+    function onVideoTimeUpdate(){
+      if (!syncVideoEl || !syncVideoEl.checked) return;
+      if (!isFinite(video.duration) || video.duration <= 0 || T<=0) return;
+      const idx = Math.max(0, Math.min(T-1, Math.round((video.currentTime / video.duration) * T)));
+      if ((parseInt(slider.value)||0) !== idx){
+        slider.value = idx; updateReadout(idx); drawFrame(idx);
+      }
+    }
+    if (video) {
+      video.addEventListener('timeupdate', onVideoTimeUpdate);
+      video.addEventListener('loadedmetadata', ()=>{
+        if (syncVideoEl && syncVideoEl.checked) onVideoTimeUpdate();
+      });
+        updateDisplayOrientation();
+    }
+    if (syncVideoEl) {
+      syncVideoEl.addEventListener('change', ()=>{
+        if (syncVideoEl.checked) { onVideoTimeUpdate(); }
+      });
+    }
+
+    // Mouse controls for canvas (orbit)
+    let dragging=false, lastX=0, lastY=0;
+    canvas.addEventListener('mousedown', (e)=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; });
+    window.addEventListener('mouseup', ()=>{ dragging=false; });
+    window.addEventListener('mousemove', (e)=>{
+      if (!dragging) return;
+      const dx = (e.clientX - lastX) / canvas.clientWidth;
+      const dy = (e.clientY - lastY) / canvas.clientHeight;
+      yaw += dx * Math.PI;
+      pitch += dy * Math.PI;
+      pitch = Math.max(-Math.PI/2+0.05, Math.min(Math.PI/2-0.05, pitch));
+      lastX=e.clientX; lastY=e.clientY; drawFrame(parseInt(slider.value)||0);
+    });
+    canvas.addEventListener('wheel', (e)=>{
+      e.preventDefault();
+      const s = Math.exp(-e.deltaY * 0.001);
+      dist = Math.max(1.2, Math.min(10.0, dist * s));
+      drawFrame(parseInt(slider.value)||0);
+    }, { passive:false });
+
+    // Initialize sizing
+    resizeCanvas();
+    updateDisplayOrientation();
+
+    // If running from project folder, try auto-load default JSON
+    // This requires the file to be served or the user to pick it; browsers block file access by path.
+    metaEl.textContent = 'Load out/poses3d_seq.json to begin';
+
+    // ---- Transform logic ----
+    function parseTuple(str, expectedLen){
+      if (!str) return null;
+      const parts = str.split(/[;,]/).map(s=>s.trim()).filter(s=>s.length>0);
+      if (!parts.length) return null;
+      const nums = parts.map(Number);
+      if (nums.some(n=>!isFinite(n))) return null;
+      if (expectedLen && nums.length < expectedLen) return null;
+      return nums;
+    }
+
+    function getAutoCenterPivot(){
+      if (!points.length) return [0,0,0];
+      return [origPoints[0][0], origPoints[0][1], origPoints[0][2]];
+    }
+
+    function applyTransformToFrames(){
+      if (!points.length) return;
+      const flip = {x: !!flipXEl.checked, y: !!flipYEl.checked, z: !!flipZEl.checked};
+      const sTuple = parseTuple(scale3dEl.value);
+      let sx=1, sy=1, sz=1;
+      if (sTuple){
+        if (sTuple.length===1){ sx=sy=sz=sTuple[0]; }
+        else { sx=sTuple[0]; sy=sTuple[1] ?? sTuple[0]; sz=sTuple[2] ?? sTuple[0]; }
+      }
+      const tTuple = parseTuple(translate3dEl.value);
+      const dx = tTuple ? (tTuple[0]||0) : 0;
+      const dy = tTuple ? (tTuple[1]||0) : 0;
+      const dz = tTuple ? (tTuple[2]||0) : 0;
+      const pTuple = parseTuple(pivot3dEl.value);
+      const pv = pTuple && pTuple.length>=3 ? [pTuple[0],pTuple[1],pTuple[2]] : getAutoCenterPivot();
+
+      for (let t=0;t<T;t++){
+        const src = origPoints[t];
+        const dst = points[t];
+        for (let j=0;j<J;j++){
+          const i = j*3;
+          let x = src[i+0], y = src[i+1], z = src[i+2];
+          if (flip.x) x = (pv[0] - (x - pv[0]));
+          if (flip.y) y = (pv[1] - (y - pv[1]));
+          if (flip.z) z = (pv[2] - (z - pv[2]));
+          x = (x - pv[0]) * sx + pv[0];
+          y = (y - pv[1]) * sy + pv[1];
+          z = (z - pv[2]) * sz + pv[2];
+          x += dx; y += dy; z += dz;
+          dst[i+0]=x; dst[i+1]=y; dst[i+2]=z;
+        }
+      }
+      
+      updateCliHint();
+    }
+
+    function resetTransform(){
+      if (!points.length) return;
+      for (let t=0;t<T;t++) points[t].set(origPoints[t]);
+      flipXEl.checked=false; flipYEl.checked=false; flipZEl.checked=false;
+      scale3dEl.value=''; translate3dEl.value=''; pivot3dEl.value='';
+      drawFrame(parseInt(slider.value)||0);
+      updateCliHint();
+    }
+
+    function updateCliHint(){
+      if (!data) { cliHintEl.textContent = 'CLI: python pose_transform.py <input.json>'; return; }
+      const parts = [ 'python pose_transform.py', '<input.json>' ];
+      const flips = [];
+      if (flipXEl.checked) flips.push('x');
+      if (flipYEl.checked) flips.push('y');
+      if (flipZEl.checked) flips.push('z');
+      if (flips.length) parts.push(`--flip3d ${flips.join(',')}`);
+      if (scale3dEl.value) parts.push(`--scale3d ${scale3dEl.value}`);
+      if (translate3dEl.value) parts.push(`--translate3d ${translate3dEl.value}`);
+      if (pivot3dEl.value) parts.push(`--pivot3d ${pivot3dEl.value}`);
+      parts.push('--out-format json');
+      cliHintEl.textContent = 'CLI: ' + parts.join(' ');
+    }
+
+    function downloadTransformed(){
+      if (!data) return alert('Load a JSON first');
+      const out = { meta: Object.assign({}, data.meta||{}), frames: new Array(T) };
+      for (let t=0;t<T;t++){
+        const flat = points[t];
+        const arr = new Array(J);
+        for (let j=0;j<J;j++){
+          const i = j*3;
+          arr[j] = [ +flat[i+0], +flat[i+1], +flat[i+2] ];
+        }
+        out.frames[t] = { frame: t, points: arr };
+      }
+      const blob = new Blob([JSON.stringify(out)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'poses3d_transformed.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    const onChangeMaybeApply = () => { if (livePreviewEl && livePreviewEl.checked) applyTransformToFrames(); else updateCliHint(); };
+    if (flipXEl) flipXEl.addEventListener('change', onChangeMaybeApply);
+    if (flipYEl) flipYEl.addEventListener('change', onChangeMaybeApply);
+    if (flipZEl) flipZEl.addEventListener('change', onChangeMaybeApply);
+    if (scale3dEl) scale3dEl.addEventListener('input', onChangeMaybeApply);
+    if (translate3dEl) translate3dEl.addEventListener('input', onChangeMaybeApply);
+    if (pivot3dEl) pivot3dEl.addEventListener('input', onChangeMaybeApply);
+    if (livePreviewEl) livePreviewEl.addEventListener('change', onChangeMaybeApply);
+    if (applyTransformBtn) applyTransformBtn.addEventListener('click', applyTransformToFrames);
+    if (resetTransformBtn) resetTransformBtn.addEventListener('click', resetTransform);
+    if (downloadTransformedBtn) downloadTransformedBtn.addEventListener('click', downloadTransformed);
+    updateCliHint();
+  })();
+  </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
