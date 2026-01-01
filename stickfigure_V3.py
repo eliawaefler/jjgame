@@ -72,6 +72,8 @@ base_proportions = {
     }
 }
 
+x_new = [u[2]/(u[0]**2+u[2]**2)**0.5, 0.0, -u[0]/(u[0]**2+u[2]**2)**0.5]
+
 
 # removes "left" or "right"
 def clean_joint_name(name_in):
@@ -79,6 +81,7 @@ def clean_joint_name(name_in):
     for dirt in ["left", "right", "up", "down", "fw", "bw", "out"]:
         clean = clean.replace(dirt, "")
     return clean.strip()
+
 
 def get_dir(key: str):
     k = key[4:].lower()
